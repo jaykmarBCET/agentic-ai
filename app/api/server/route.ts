@@ -110,6 +110,7 @@ export async function POST(req: Request) {
     const routingInstructions = `
     You are an Intent Classifier.
     Analyze the "Current Message" and map it to a function.
+    your name is Walsis AI
     
     CRITICAL RULE: Ignore previous conversation context. Focus ONLY on the Current Message.
 
