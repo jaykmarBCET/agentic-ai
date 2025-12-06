@@ -141,7 +141,7 @@ export default function HomePage() {
             <BotIcon />
           </div>
           <h1 className="font-bold text-lg tracking-tight text-slate-800">
-            Nexus AI
+            Walsis AI
           </h1>
         </div>
         <button 
