@@ -131,6 +131,11 @@ export default function HomePage() {
     }
   };
 
+  const sizeOfConversation = (data:any[])=>{
+    const size = new Blob([JSON.stringify(data)]).size
+    return size
+  }
+
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50 font-sans text-slate-900">
       
@@ -282,10 +287,10 @@ export default function HomePage() {
           
           <button
             onClick={handleGenerate}
-            disabled={loading || !text.trim()}
+            disabled={loading || !text.trim() || sizeOfConversation(messages)>=15000}
             className="mb-1 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed transition-all active:scale-95"
           >
-            <SendIcon />
+            {sizeOfConversation(messages)>=15000?"Clear History":<SendIcon />}
           </button>
         </div>
         <div className="text-center mt-2">
