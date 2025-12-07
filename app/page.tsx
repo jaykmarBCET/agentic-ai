@@ -330,6 +330,17 @@ export default function HomePage() {
       <footer className="p-4 bg-white/80 backdrop-blur-sm border-t border-slate-200">
         <div className="max-w-3xl  mx-auto relative flex items-end gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:bg-white focus-within:border-blue-300 transition-all shadow-inner">
 
+          <label className='w-30' >
+            <strong className={`absolute top-2 rounded-2xl border-dotted  border-gray-500 border-2 px-8 py-2 ${fileText?"bg-blue-500":""} `}>File</strong>
+            <input
+              type="file"
+              className="w-30 text-transparent"
+              accept="application/pdf"
+              onChange={(e) => extractText(e.target.files?.[0] || null)}
+              multiple={false}
+            />
+
+          </label>
           <textarea
             ref={textareaRef}
             value={text}
@@ -344,17 +355,6 @@ export default function HomePage() {
             className="flex-1 max-h-[150px] bg-transparent border-none outline-none text-slate-800 placeholder:text-slate-400 px-3 py-2 resize-none leading-relaxed"
             rows={1}
           />
-          <label className='w-30' >
-            <strong className={`absolute top-2 rounded-2xl border-dotted  border-gray-500 border-2 px-8 py-2 ${fileText?"bg-blue-500":""} `}>File</strong>
-            <input
-              type="file"
-              className="w-30 text-transparent"
-              accept="application/pdf"
-              onChange={(e) => extractText(e.target.files?.[0] || null)}
-              multiple={false}
-            />
-
-          </label>
 
 
           <button
