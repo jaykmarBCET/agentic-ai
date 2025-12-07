@@ -145,7 +145,7 @@ const generateVideoResponse = async (prompt: string, history: any[]) => {
         ], true);
 
         // FIX: Return the extracted object directly (removed { videoData: ... } wrapper)
-        return extractJSON(response);
+        return  {videoData:extractJSON(response)}
 
     } catch (e) {
         console.error("Video Gen Error", e);
