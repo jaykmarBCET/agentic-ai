@@ -56,10 +56,10 @@ export const generateImageUrl = async (prompt: string): Promise<string | null> =
       model: "black-forest-labs/FLUX.1-dev",
       inputs: prompt,
       parameters: { width: 1024, height: 768 }
-    });
+    }) as any
 
     // Convert Blob → ArrayBuffer
-    const arrayBuffer = await imageBlob.arrayBuffer();
+    const arrayBuffer = await imageBlob?.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
 
     // Make Data URL
