@@ -1,10 +1,11 @@
 "use client";
 
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import CodeBlock from "@/components/CodeBlock"; // Your updated component
 import { QuizCard } from "@/components/QuizCard"; // Your updated component
+import VideoSummarizer from "@/components/VideoSummarizer";
 
 // --- Types ---
 export interface IQuiz {
@@ -16,15 +17,23 @@ export interface IQuiz {
   currentAnswer: string;
 }
 
+export interface VideoInfo {
+  summary:string;
+  questionAnswer?:string,
+  videoUrl:string
+
+}
+
 interface IMessage {
   role: "user" | "assistant";
-  type: "text" | "quiz" | "image" | "code";
-  content: string | IQuiz[];
+  type: "text" | "quiz" | "image" | "code" | "video";
+  content: string | IQuiz[] | VideoInfo;
   language?: string;
 }
 
 export default function HomePage() {
   const [text, setText] = useState("");
+  const [fileText, setFileText] = useState("")
   const [messages, setMessages] = useState<IMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,13 +76,25 @@ export default function HomePage() {
     // 1. Add User Message
     const userMsg: IMessage = { role: "user", type: "text", content: text };
     setMessages((prev) => [...prev, userMsg]);
-    
+
     setLoading(true);
-    const userPrompt = text;
+    let userPrompt = text;
     setText("");
 
     // Reset textarea height
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (fileText) {
+
+      userPrompt = `
+       # PDF DATA
+       ${fileText}
+
+       # USER PROMPT
+       ${userPrompt}
+      `
+      setFileText("")
+
+    }
 
     try {
       // 2. API Call
@@ -95,20 +116,24 @@ export default function HomePage() {
       } else if (result.image) {
         newMsg = { role: "assistant", type: "image", content: result.image };
       } else if (result.type === "code") {
-        newMsg = { 
-          role: "assistant", 
-          type: "code", 
-          content: result.code, 
-          language: result.language || "javascript" 
+        newMsg = {
+          role: "assistant",
+          type: "code",
+          content: result.code,
+          language: result.language || "javascript"
         };
       } else if (typeof result === "string") {
         newMsg = { role: "assistant", type: "text", content: result };
-      } else {
+      } 
+      else if(result?.videoData){
+        newMsg = {role:"assistant",type:"video",content:result.videoData}
+      }
+      else {
         // Fallback
-        newMsg = { 
-          role: "assistant", 
-          type: "text", 
-          content: JSON.stringify(result, null, 2) 
+        newMsg = {
+          role: "assistant",
+          type: "text",
+          content: JSON.stringify(result, null, 2)
         };
       }
 
@@ -131,14 +156,44 @@ export default function HomePage() {
     }
   };
 
-  const sizeOfConversation = (data:any[])=>{
+  const extractText = async (pdfFile: File | null) => {
+    try {
+      if (!pdfFile) return;
+      if(pdfFile.size>=100*2024){
+        alert`
+        File most be less then 100kb
+        `
+        return
+      }
+      const formData = new FormData()
+      formData.append("file", pdfFile)
+      setLoading(true)
+
+      const response = await axios.post("/api/pdf/read", formData)
+
+      if (response.status >= 400) return;
+
+      const pdfText = response.data.text;
+      setFileText(pdfText)
+      
+    } catch (e) {
+      const error = e as AxiosError
+      alert(error.message)
+
+    }finally{
+      setLoading(false)
+    }
+
+  }
+
+  const sizeOfConversation = (data: any[]) => {
     const size = new Blob([JSON.stringify(data)]).size
     return size
   }
 
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50 font-sans text-slate-900">
-      
+
       {/* --- HEADER --- */}
       <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
         <div className="flex items-center gap-2.5">
@@ -149,7 +204,7 @@ export default function HomePage() {
             Walsis AI
           </h1>
         </div>
-        <button 
+        <button
           onClick={clearChat}
           className="text-xs font-medium text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1"
         >
@@ -161,7 +216,7 @@ export default function HomePage() {
       {/* --- MAIN CHAT AREA --- */}
       <main className="flex-1 overflow-y-auto p-4 sm:p-6 scroll-smooth">
         <div className="max-w-3xl mx-auto space-y-6">
-          
+
           {/* Welcome State */}
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4 opacity-0 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -179,9 +234,8 @@ export default function HomePage() {
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-                msg.role === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ${msg.role === "user" ? "justify-end" : "justify-start"
+                }`}
             >
               {/* AI Avatar */}
               {msg.role === "assistant" && (
@@ -192,19 +246,25 @@ export default function HomePage() {
 
               {/* Content Bubble */}
               <div className={`flex flex-col max-w-[90%] sm:max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                
+
                 {/* --- TEXT --- */}
                 {msg.type === "text" && (
                   <div
-                    className={`px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm ${
-                      msg.role === "user"
-                        ? "bg-blue-600 text-white rounded-br-none"
-                        : "bg-white border border-slate-200 text-slate-700 rounded-bl-none"
-                    }`}
+                    className={`px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm ${msg.role === "user"
+                      ? "bg-blue-600 text-white rounded-br-none"
+                      : "bg-white border border-slate-200 text-slate-700 rounded-bl-none"
+                      }`}
                   >
                     <Markdown >{msg.content as string}</Markdown>
                   </div>
                 )}
+
+                {/* VideoSummary */}
+                {msg.type ==='video' && (
+                  <VideoSummarizer data={msg?.content as VideoInfo} />
+                )
+
+                }
 
                 {/* --- QUIZ --- */}
                 {msg.type === "quiz" && (
@@ -236,11 +296,11 @@ export default function HomePage() {
                 {/* --- CODE --- */}
                 {msg.type === "code" && (
                   <div className="w-full max-w-3xl">
-                     {/* Ensure your CodeBlock handles just 'code' prop string */}
-                     <CodeBlock 
-                        code={msg.content as string} 
-                        language={msg.language || 'javascript'} 
-                     />
+                    {/* Ensure your CodeBlock handles just 'code' prop string */}
+                    <CodeBlock
+                      code={msg.content as string}
+                      language={msg.language || 'javascript'}
+                    />
                   </div>
                 )}
 
@@ -250,26 +310,26 @@ export default function HomePage() {
 
           {/* Loading Indicator */}
           {loading && (
-             <div className="flex justify-start gap-4">
-               <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                  <BotIcon className="w-4 h-4 text-indigo-600" />
-               </div>
-               <div className="bg-white border border-slate-200 px-5 py-4 rounded-2xl rounded-bl-none shadow-sm flex items-center gap-1.5">
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-               </div>
-             </div>
+            <div className="flex justify-start gap-4">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                <BotIcon className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="bg-white border border-slate-200 px-5 py-4 rounded-2xl rounded-bl-none shadow-sm flex items-center gap-1.5">
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
           )}
-          
+
           <div ref={bottomRef} className="h-4" />
         </div>
       </main>
 
       {/* --- FOOTER INPUT --- */}
       <footer className="p-4 bg-white/80 backdrop-blur-sm border-t border-slate-200">
-        <div className="max-w-3xl mx-auto relative flex items-end gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:bg-white focus-within:border-blue-300 transition-all shadow-inner">
-          
+        <div className="max-w-3xl  mx-auto relative flex items-end gap-2 bg-slate-100 p-2 rounded-2xl border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:bg-white focus-within:border-blue-300 transition-all shadow-inner">
+
           <textarea
             ref={textareaRef}
             value={text}
@@ -284,17 +344,29 @@ export default function HomePage() {
             className="flex-1 max-h-[150px] bg-transparent border-none outline-none text-slate-800 placeholder:text-slate-400 px-3 py-2 resize-none leading-relaxed"
             rows={1}
           />
-          
+          <label className='w-30' >
+            <strong className={`absolute top-2 rounded-2xl border-dotted  border-gray-500 border-2 px-8 py-2 ${fileText?"bg-blue-500":""} `}>File</strong>
+            <input
+              type="file"
+              className="w-30 text-transparent"
+              accept="application/pdf"
+              onChange={(e) => extractText(e.target.files?.[0] || null)}
+              multiple={false}
+            />
+
+          </label>
+
+
           <button
             onClick={handleGenerate}
-            disabled={loading || !text.trim() || sizeOfConversation(messages)>=15000}
+            disabled={loading || !text.trim() || sizeOfConversation(messages) >= 25000}
             className="mb-1 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed transition-all active:scale-95"
           >
-            {sizeOfConversation(messages)>=15000?"Clear History":<SendIcon />}
+            {sizeOfConversation(messages) >= 25000 ? "Clear History" : <SendIcon />}
           </button>
         </div>
         <div className="text-center mt-2">
-            <span className="text-[10px] text-slate-400">AI can make mistakes. Check important info.</span>
+          <span className="text-[10px] text-slate-400">AI can make mistakes. Check important info.</span>
         </div>
       </footer>
     </div>
@@ -316,15 +388,15 @@ const SendIcon = () => (
 );
 
 const TrashIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 6h18" />
-        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-    </svg>
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18" />
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+  </svg>
 );
 
 const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" >
-        <path d="M9.8 12.7c-2.4-.6-5.8-3.4-6.3-5.8-.1-.4-.6-.4-.7 0-.5 2.4-3.9 5.2-6.3 5.8-.4.1-.4.6 0 .7 2.4.6 5.8 3.4 6.3 5.8.1.4.6.4.7 0 .5-2.4 3.9-5.2 6.3-5.8.4-.1.4-.6 0-.7zM18 10.5c-1.3-.3-3-1.8-3.3-3-.1-.2-.3-.2-.4 0-.3 1.2-2 2.7-3.3 3-.2 0-.2.3 0 .3 1.3.3 3 1.8 3.3 3 .1.2.3.2.4 0 .3-1.2 2-2.7 3.3-3 .2 0 .2-.3 0-.3z"/>
-    </svg>
+  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" >
+    <path d="M9.8 12.7c-2.4-.6-5.8-3.4-6.3-5.8-.1-.4-.6-.4-.7 0-.5 2.4-3.9 5.2-6.3 5.8-.4.1-.4.6 0 .7 2.4.6 5.8 3.4 6.3 5.8.1.4.6.4.7 0 .5-2.4 3.9-5.2 6.3-5.8.4-.1.4-.6 0-.7zM18 10.5c-1.3-.3-3-1.8-3.3-3-.1-.2-.3-.2-.4 0-.3 1.2-2 2.7-3.3 3-.2 0-.2.3 0 .3 1.3.3 3 1.8 3.3 3 .1.2.3.2.4 0 .3-1.2 2-2.7 3.3-3 .2 0 .2-.3 0-.3z" />
+  </svg>
 );

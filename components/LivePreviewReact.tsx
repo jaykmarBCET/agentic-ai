@@ -7,15 +7,13 @@ import * as Babel from "@babel/standalone";
 interface IFrameWindow extends Window {
   React?: any;
   ReactDOM?: any;
-  zustand?: any;
-  ReactIconsFa?: Record<string, any>;
-  ReactIconsAi?: Record<string, any>;
-  axios?: any;
-  dayjs?: any;
-  _: any;
+  Lucide?: any;
+  Recharts?: any;
   motion?: any;
+  _?: any; // Lodash
+  dayjs?: any;
   console: Console;
-  eval: (code: string) => any;
+  eval:any
 }
 
 export default function LivePreviewReact({
@@ -32,148 +30,179 @@ export default function LivePreviewReact({
     []
   );
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
-  const [key, setKey] = useState(0); // Used to force iframe refresh
+  const [key, setKey] = useState(0);
 
   const pushLog = (type: "log" | "error", msg: string) => {
     setLogs((prev) => [...prev, { type, msg }]);
-    if (type === "error") setIsConsoleOpen(true); // Auto-open on error
+    if (type === "error") setIsConsoleOpen(true);
   };
 
-  /** ============================
-   * TRANSFORMATION LOGIC
-   * ============================ */
-  const transformPackages = (c: string): string => {
-    // react-icons/fa
-    c = c.replace(
-      /import\s*{([^}]+)}\s*from\s*['"]react-icons\/fa['"]/g,
-      (_match, items) => `const { ${items.trim()} } = ReactIconsFa;`
-    );
 
-    // react-icons/ai
-    c = c.replace(
-      /import\s*{([^}]+)}\s*from\s*['"]react-icons\/ai['"]/g,
-      (_match, items) => `const { ${items.trim()} } = ReactIconsAi;`
-    );
-
-    // zustand
-    c = c.replace(/import\s*{([^}]+)}\s*from\s*['"]zustand["']/g, () => {
-      return `const { create } = zustand;`;
-    });
-
-    return c;
-  };
-
-  const transformReactCode = (rawCode: string): string => {
+  const transformCode = (rawCode: string): string => {
     let c = rawCode;
 
-    // remove imports
-    c = c.replace(/import[\s\S]*?['"].*?['"];?/g, "");
-    c = c.replace(/export\s+default/g, "");
+    // 1. Handle "export default" to capture the component
+    // We replace "export default function App" or "export default () =>" 
+    // with "window.RenderComponent =" so we know exactly what to render.
+    if (c.includes("export default")) {
+      c = c.replace(/export\s+default\s+/, "window.RenderComponent = ");
+    } else {
+      // Fallback: If no export default, try to find the last defined function
+      // This is risky but helps if the AI forgets export default.
+      // Ideally, the AI should always export default.
+    }
 
-    c = transformPackages(c);
+    // 2. Remove standard React imports (we inject them globally later)
+    c = c.replace(/import\s+React\s*(?:,\s*{[^}]*})?\s*from\s*['"]react['"];?/g, "");
+    
+    // 3. Transform Common Libraries (Shim imports to window globals)
+    
+    // Lucide React
+    c = c.replace(
+      /import\s*{([^}]+)}\s*from\s*['"]lucide-react['"];?/g,
+      "const { $1 } = window.Lucide;"
+    );
 
-    // Convert hooks
-    c = c
-      .replace(/\buseState\b/g, "React.useState")
-      .replace(/\buseEffect\b/g, "React.useEffect")
-      .replace(/\buseRef\b/g, "React.useRef")
-      .replace(/\buseMemo\b/g, "React.useMemo")
-      .replace(/\buseCallback\b/g, "React.useCallback")
-      .replace(/\buseReducer\b/g, "React.useReducer");
+    // Recharts
+    c = c.replace(
+      /import\s*{([^}]+)}\s*from\s*['"]recharts['"];?/g,
+      "const { $1 } = window.Recharts;"
+    );
 
-    // Detect component name
-    const compMatch = c.match(/function\s+([A-Z]\w*)/);
-    const compName = compMatch ? compMatch[1] : "App";
+    // Framer Motion
+    c = c.replace(
+      /import\s*{([^}]+)}\s*from\s*['"]framer-motion['"];?/g,
+      "const { $1 } = window.motion;"
+    );
+    
+    // React Icons (General catch-all for fa, ai, bs, etc if loaded)
+    // Note: You need to load specific CDN scripts for these to work perfectly, 
+    // but this prevents the code from crashing on import.
+    c = c.replace(/import\s*{([^}]+)}\s*from\s*['"]react-icons\/(\w+)['"];?/g, "");
+
+    // 4. Remove any remaining imports to prevent "Require is not defined" errors
+    // (This is a safety net. Variables might be undefined, but code won't crash on syntax)
+    c = c.replace(/import\s+.*?from\s+['"].*?['"];?/g, "");
 
     return `
+      // Inject Global Hooks so 'useState' works without React.useState
+      const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, createContext } = React;
+      
+      // Inject other globals if needed
+      const { motion, AnimatePresence } = window.motion || {};
+
       ${c}
 
+      // Render Logic
       try {
-        const root = ReactDOM.createRoot(document.getElementById("root"));
-        root.render(React.createElement(${compName}));
+        const rootElement = document.getElementById("root");
+        if (!window.RenderComponent) {
+           throw new Error("No component found. Please ensure you use 'export default function...'");
+        }
+        
+        // Check if root already exists (for HMR-like feel) or create new
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(React.createElement(window.RenderComponent));
       } catch (e) {
-        console.error(e);
+        console.error("Render Error:", e.message);
       }
     `;
   };
 
-  /** ============================
-   * MAIN EFFECT
-   * ============================ */
+
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
+    // Reset iframe to ensure clean slate
+    // (We use the 'key' prop on the iframe in JSX to force full DOM reset)
+    
     const doc = iframe.contentDocument;
     const win = iframe.contentWindow as IFrameWindow | null;
-
     if (!doc || !win) return;
 
-    setLogs([]);
+    setLogs([]); // Clear logs on new render
 
-    // Patch console
-    win.console.log = (...args: unknown[]) =>
-      pushLog("log", args.join(" "));
-    win.console.error = (...args: unknown[]) =>
-      pushLog("error", args.join(" "));
+    // Patch Console
+    win.console.log = (...args: unknown[]) => pushLog("log", args.join(" "));
+    win.console.error = (...args: unknown[]) => pushLog("error", args.join(" "));
 
-    // Write HTML and load CDNs
-    doc.open();
-    doc.write(`
+    // Setup HTML Document
+    const htmlContent = `
+      <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          
+          <script src="https://cdn.tailwindcss.com"></script>
           <style>
-            body { margin: 0; font-family: sans-serif; }
-            ${css || ""}
+            body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            /* Scrollbar styling for a cleaner look */
+            ::-webkit-scrollbar { width: 6px; height: 6px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+            ${css}
           </style>
 
-          <script src="https://cdn.tailwindcss.com"></script>
           <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
           <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/zustand/umd/zustand.min.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/react-icons@4.12.0/fa/index.umd.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/react-icons@4.12.0/ai/index.umd.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/dayjs/dayjs.min.js"></script>
+          
           <script src="https://cdn.jsdelivr.net/npm/lodash/lodash.min.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/framer-motion/dist/framer-motion.umd.js"></script>
-        </head>
+          <script src="https://cdn.jsdelivr.net/npm/dayjs/dayjs.min.js"></script>
+          
+          <script src="https://unpkg.com/lucide@latest"></script> <script src="https://unpkg.com/recharts/umd/Recharts.js"></script> <script src="https://cdn.jsdelivr.net/npm/framer-motion@10.16.4/dist/framer-motion.js"></script> </head>
         <body>
-          <div id="root">${html || ""}</div>
+          <div id="root">${html}</div>
+          <script>
+             // Fix for Recharts which sometimes looks for global Recharts object
+             window.Recharts = window.Recharts || {};
+          </script>
         </body>
       </html>
-    `);
+    `;
+
+    doc.open();
+    doc.write(htmlContent);
     doc.close();
 
+    // Compile and Run
     iframe.onload = () => {
+      if (!win.React || !win.ReactDOM) {
+        pushLog("error", "React failed to load within the iframe.");
+        return;
+      }
+
       try {
-        const transformed = transformReactCode(code);
+        const transformed = transformCode(code);
+      
         const compiled = Babel.transform(transformed, {
           presets: ["react", "env"],
+          filename: "main.tsx", // Helps with error reporting
         }).code;
 
         win.eval(compiled || "");
-      } catch (err) {
-        pushLog("error", String(err));
+      } catch (err: any) {
+        pushLog("error", `Syntax/Compile Error: ${err.message}`);
       }
     };
-  }, [code, css, html, key]); // Depend on 'key' to force re-renders
+  }, [code, css, html, key]);
 
   const errorCount = logs.filter((l) => l.type === "error").length;
 
   return (
-    <div className="w-full h-full flex flex-col bg-white">
+    <div className="w-full h-full flex flex-col bg-white rounded-lg overflow-hidden border border-slate-200 shadow-sm">
       
-      {/* --- PREVIEW HEADER --- */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-100 border-b border-slate-200">
+      
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
         <div className="flex items-center gap-2">
-           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-             Browser Preview
+           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+           <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+             Live Preview
            </span>
         </div>
         
         <div className="flex items-center gap-2">
-            {/* Refresh Button */}
             <button 
                 onClick={() => setKey(prev => prev + 1)}
                 className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition"
@@ -182,7 +211,6 @@ export default function LivePreviewReact({
                 <RefreshIcon />
             </button>
 
-            {/* Console Toggle */}
             <button
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
                 className={`flex items-center gap-2 px-3 py-1 text-xs font-medium rounded-full transition-all border ${
@@ -194,7 +222,7 @@ export default function LivePreviewReact({
                 <TerminalIcon />
                 <span>Console</span>
                 {errorCount > 0 && (
-                    <span className="flex items-center justify-center w-4 h-4 bg-red-500 text-white text-[9px] rounded-full">
+                    <span className="flex items-center justify-center w-4 h-4 bg-red-500 text-white text-[9px] rounded-full font-bold">
                         {errorCount}
                     </span>
                 )}
@@ -202,32 +230,32 @@ export default function LivePreviewReact({
         </div>
       </div>
 
-      {/* --- IFRAME AREA --- */}
-      <div className="relative flex-1 min-h-[350px] bg-white">
+    
+      <div className="relative flex-1 bg-white min-h-[400px]">
         <iframe
           key={key}
           ref={iframeRef}
           className="w-full h-full absolute inset-0 border-none"
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
           title="Live Preview"
         />
       </div>
 
-      {/* --- CONSOLE DRAWER --- */}
+      
       {isConsoleOpen && (
-        <div className="h-40 bg-[#1e1e1e] border-t border-slate-700 flex flex-col animate-in slide-in-from-bottom-2 duration-200">
-            <div className="flex items-center justify-between px-3 py-1 bg-[#252526] border-b border-black/20">
-                <span className="text-[10px] uppercase text-slate-400 font-mono">Terminal Output</span>
-                <button onClick={() => setLogs([])} className="text-[10px] text-slate-400 hover:text-white">Clear</button>
+        <div className="h-48 bg-[#1e1e1e] border-t border-slate-700 flex flex-col shadow-inner">
+            <div className="flex items-center justify-between px-4 py-1.5 bg-[#2d2d2d] border-b border-black/20 select-none">
+                <span className="text-[10px] uppercase text-slate-400 font-mono tracking-wider">Terminal Output</span>
+                <button onClick={() => setLogs([])} className="text-[10px] text-slate-400 hover:text-white transition-colors">Clear</button>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 font-mono text-xs space-y-1">
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-xs space-y-1.5 scroll-smooth">
                 {logs.length === 0 ? (
-                    <div className="text-slate-600 italic">No output...</div>
+                    <div className="text-slate-600 italic opacity-50">No output logs...</div>
                 ) : (
                     logs.map((log, i) => (
-                        <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                            <span className="opacity-50 select-none">➤</span>
-                            <span className="break-all">{log.msg}</span>
+                        <div key={i} className={`flex gap-2.5 ${log.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+                            <span className="opacity-40 select-none shrink-0">{log.type === 'error' ? '✖' : '➜'}</span>
+                            <span className="break-all leading-relaxed whitespace-pre-wrap">{log.msg}</span>
                         </div>
                     ))
                 )}
@@ -238,7 +266,7 @@ export default function LivePreviewReact({
   );
 }
 
-// --- ICONS ---
+
 
 const RefreshIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
